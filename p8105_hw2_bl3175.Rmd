@@ -1,0 +1,64 @@
+---
+title: "p8105_hw2_bl3175"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)  
+library(readxl)     
+library(janitor)     
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+```{r problem1, echo=TRUE}
+# 1) Import and clean pols data
+pols <- read_csv("./data/pols-month.csv") |>
+  separate(mon, into = c("year","month","day"), convert = TRUE) |>  # split YYYY-MM-DD
+  mutate(
+    month     = tolower(month.name[month]),   # number -> month name (lowercase)
+    president = if_else(prez_gop == 1, "gop", "dem"),
+    month_num = match(month, tolower(month.name))  # 1..12 for stable sorting
+  ) |>
+  select(year, month, month_num, president, starts_with("gov"), starts_with("sen"),
+         -prez_dem, -prez_gop, -day) |>
+  arrange(year, month_num) |>
+  select(-month_num)
+
+# 2) Import and clean snp data
+snp <- read_csv("./data/snp.csv") |>
+  separate(date, into = c("year","month","day"), convert = TRUE) |>
+  mutate(
+    month     = tolower(month.name[month]),
+    month_num = match(month, tolower(month.name))
+  ) |>
+  select(year, month, month_num, close) |>
+  arrange(year, month_num) |>
+  select(-month_num)
+
+# 3) Import and tidy unemployment data (wide -> long)
+unemp <- read_csv("./data/unemployment.csv") |>
+  pivot_longer(
+    cols = -Year,
+    names_to  = "month_abbr",
+    values_to = "unemployment"
+  ) |>
+  mutate(
+    month     = tolower(month.name[match(month_abbr, month.abb)]),
+    month_num = match(month, tolower(month.name))
+  ) |>
+  rename(year = Year) |>   
+  select(year, month, month_num, unemployment) |>
+  arrange(year, month_num) |>
+  select(-month_num)
+
+# 4) Merge all datasets
+p1_merged <- pols |>
+  left_join(snp,  by = c("year","month")) |>
+  left_join(unemp, by = c("year","month"))
+
+# 5) Quick summary in output
+dim(p1_merged)                         # dimensions
+range(p1_merged$year, na.rm = TRUE)    # year range
+names(p1_merged)                       # variable names
+head(p1_merged, 5)                     # peek first rows
+```
