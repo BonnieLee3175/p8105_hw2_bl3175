@@ -62,3 +62,70 @@ range(p1_merged$year, na.rm = TRUE)    # year range
 names(p1_merged)                       # variable names
 head(p1_merged, 5)                     # peek first rows
 ```
+
+```{r problem2, echo=TRUE, message=FALSE, warning=FALSE}
+# --- helpers to standardize column names across sheets -----------------
+# ensure there is a 'sports' integer column
+std_sports <- function(df) {
+  if ("sports" %in% names(df)) {
+    df |> dplyr::mutate(sports = as.integer(round(sports)))
+  } else if ("sports_balls" %in% names(df)) {
+    df |> dplyr::rename(sports = sports_balls) |>
+      dplyr::mutate(sports = as.integer(round(sports)))
+  } else {
+    df |> dplyr::mutate(sports = NA_integer_)
+  }
+}
+
+# ensure 'weight_tons' exists
+std_weight <- function(df) {
+  if ("weight_tons" %in% names(df)) df
+  else if ("weight" %in% names(df)) dplyr::rename(df, weight_tons = weight)
+  else df
+}
+
+# ensure 'cigarette_butts' exists
+std_cigs <- function(df) {
+  if ("cigarette_butts" %in% names(df)) df
+  else if ("cigarette" %in% names(df)) dplyr::rename(df, cigarette_butts = cigarette)
+  else df |> dplyr::mutate(cigarette_butts = NA_real_)
+}
+
+# read one sheet and clean
+read_trash <- function(sheet_name, wheel_label) {
+  readxl::read_excel("./data/202409 Trash Wheel Collection Data.xlsx",
+                     sheet = sheet_name, skip = 1) |>
+    janitor::clean_names() |>                  # snake_case names
+    dplyr::filter(!is.na(dumpster)) |>         # drop non-data rows
+    dplyr::mutate(year = as.integer(year)) |>  # <<< make 'year' consistent
+    std_weight() |> std_cigs() |> std_sports() |>
+    dplyr::mutate(wheel = wheel_label,
+                  month = stringr::str_to_title(month))  # e.g., "June"
+}
+
+# read three wheels
+mr   <- read_trash("Mr. Trash Wheel",         "Mr")
+prof <- read_trash("Professor Trash Wheel",   "Professor")
+gw   <- read_trash("Gwynnda Trash Wheel",     "Gwynnda")
+
+# combine
+trash <- dplyr::bind_rows(mr, prof, gw)
+
+# summaries required by the prompt
+prof_total_weight <- trash |>
+  dplyr::filter(wheel == "Professor") |>
+  dplyr::summarise(total_weight_tons = sum(weight_tons, na.rm = TRUE))
+
+gw_cig_2022_06 <- trash |>
+  dplyr::filter(wheel == "Gwynnda", year == 2022, month == "June") |>
+  dplyr::summarise(total_cig_butts = sum(cigarette_butts, na.rm = TRUE))
+
+# counts for inline R if needed
+n_obs_trash <- nrow(trash)
+vars_trash  <- names(trash)
+
+# quick peek
+head(trash, 5)
+prof_total_weight
+gw_cig_2022_06
+```
