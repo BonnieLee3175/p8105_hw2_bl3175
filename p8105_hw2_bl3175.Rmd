@@ -6,7 +6,8 @@ output: github_document
 ```{r setup, include=FALSE}
 library(tidyverse)  
 library(readxl)     
-library(janitor)     
+library(janitor)  
+library(lubridate)
 knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
 ```
 
@@ -62,6 +63,8 @@ range(p1_merged$year, na.rm = TRUE)    # year range
 names(p1_merged)                       # variable names
 head(p1_merged, 5)                     # peek first rows
 ```
+
+The merged dataset has `r nrow(p1_merged)` rows and `r ncol(p1_merged)` columns, covering years `r min(p1_merged$year, na.rm = TRUE)`–`r max(p1_merged$year, na.rm = TRUE)`. Key variables include the month label (month), the party of the sitting president (president), the S&P 500 closing level (close), and the unemployment rate (unemployment). Column names are: `r paste(names(p1_merged), collapse = ", ")`.
 
 ```{r problem2, echo=TRUE, message=FALSE, warning=FALSE}
 # --- helpers to standardize column names across sheets -----------------
@@ -129,3 +132,101 @@ head(trash, 5)
 prof_total_weight
 gw_cig_2022_06
 ```
+
+The combined Trash Wheel dataset has `r nrow(trash)` rows, including variables such as dumpster, month, year, weight_tons, and cigarette_butts. For available data, Professor Trash Wheel collected `r round(dplyr::pull(prof_total_weight, total_weight_tons), 2)` tons in total. Gwynnda collected `r dplyr::pull(gw_cig_2022_06, total_cig_butts)` cigarette butts in June 2022.
+
+```{r problem3, echo=TRUE, message=FALSE, warning=FALSE}
+# --- Problem 3: NYC ZORI data ------------------------------------------
+
+# clean ZIP metadata
+zip_meta <- read_csv("./data/Zip Codes.csv", show_col_types = FALSE) |>
+  clean_names() |>
+  select(
+    county = county,
+    zip    = matches("^zip"),
+    neighborhood = neighborhood
+  ) |>
+  mutate(
+    county = str_trim(county),
+    borough = case_match(
+      county,
+      "Bronx" ~ "Bronx",
+      "Kings" ~ "Brooklyn",
+      "New York" ~ "Manhattan",
+      "Queens" ~ "Queens",
+      "Richmond" ~ "Staten Island",
+      .default = county
+    ),
+    zip = as.character(zip)
+  ) |>
+  select(borough, neighborhood, zip)
+
+# clean Zillow ZORI
+zori_raw <- read_csv("./data/Zip_zori_uc_sfrcondomfr_sm_month_NYC.csv",
+                     show_col_types = FALSE) |>
+  clean_names()
+
+meta_cols <- c("region_id","size_rank","region_name","region_type",
+               "state_name","state","city","metro","county_name")
+
+zori_tidy <- zori_raw |>
+  filter(region_type == "zip", state_name == "NY") |>
+  pivot_longer(
+    cols = -all_of(meta_cols),
+    names_to   = "ymd_str",
+    values_to  = "zori"
+  ) |>
+  mutate(
+    ymd_str = str_remove(ymd_str, "^x"),
+    date    = ymd(str_replace_all(ymd_str, "_", "-"), quiet = TRUE),
+    ym      = floor_date(date, "month"),
+    zip     = as.character(region_name),
+    borough = case_match(
+      county_name,
+      "Bronx County" ~ "Bronx",
+      "Kings County" ~ "Brooklyn",
+      "New York County" ~ "Manhattan",
+      "Queens County" ~ "Queens",
+      "Richmond County" ~ "Staten Island",
+      .default = county_name
+    )
+  ) |>
+  select(zip, borough, ym, zori)
+
+# merge ZORI with metadata
+zori_final <- zori_tidy |>
+  left_join(select(zip_meta, zip, borough_meta = borough, neighborhood),
+            by = "zip") |>
+  mutate(borough = coalesce(borough, borough_meta)) |>
+  select(zip, borough, neighborhood, ym, zori)
+
+# summary numbers
+n_obs_p3   <- nrow(zori_final)
+n_zip_p3   <- n_distinct(zori_final$zip)
+n_neigh_p3 <- n_distinct(na.omit(zori_final$neighborhood))
+
+# ZIP codes missing in Zillow
+zips_only_in_meta <- setdiff(zip_meta$zip, unique(zori_final$zip))
+
+# changes from 2020 to 2021
+zori_2020_01 <- zori_final |>
+  filter(ym == ymd("2020-01-01")) |>
+  select(zip, zori_2020_01 = zori)
+
+zori_2021_01 <- zori_final |>
+  filter(ym == ymd("2021-01-01")) |>
+  select(zip, zori_2021_01 = zori)
+
+drops_tbl <- zori_2020_01 |>
+  inner_join(zori_2021_01, by = "zip") |>
+  mutate(drop = zori_2021_01 - zori_2020_01) |>
+  left_join(distinct(zori_final, zip, borough, neighborhood), by = "zip") |>
+  arrange(drop) |>
+  slice_head(n = 10) |>
+  select(zip, borough, neighborhood, zori_2020_01, zori_2021_01, drop)
+head(zori_final, 5)
+tibble::tibble(zips_only_in_meta = head(zips_only_in_meta, 10))
+drops_tbl
+```
+
+The tidy NYC ZORI dataset has `r nrow(zori_final)` rows, covering `r n_distinct(zori_final$zip)` unique ZIP codes and `r n_distinct(na.omit(zori_final$neighborhood))` unique neighborhoods. There are `r length(zips_only_in_meta)` ZIP codes present in the ZIP metadata but not in the Zillow dataset (e.g., `r paste(head(zips_only_in_meta, 3), collapse = ", ")`). Comparing January 2020 to January 2021, the largest drop occurs at ZIP `r dplyr::slice_head(drops_tbl, n = 1) |> dplyr::pull(zip)` in `r dplyr::slice_head(drops_tbl, n = 1) |> dplyr::pull(borough)`, with neighborhood `r dplyr::slice_head(drops_tbl, n = 1) |> dplyr::pull(neighborhood)`, changing from `r dplyr::slice_head(drops_tbl, n = 1) |> dplyr::pull(zori_2020_01)` to `r dplyr::slice_head(drops_tbl, n = 1) |> dplyr::pull(zori_2021_01)`, a difference of `r dplyr::slice_head(drops_tbl, n = 1) |> dplyr::pull(drop)`.
